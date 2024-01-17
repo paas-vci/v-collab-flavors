@@ -1,0 +1,50 @@
+FROM golang:alpine AS builder
+WORKDIR /app
+COPY ./ ./
+RUN go mod download
+RUN go mod tidy
+WORKDIR /app/agent/cmd
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/agent
+
+FROM ubuntu:22.04
+USER root
+ENV DEBIAN_FRONTEND noninteractive
+
+#Update package list and install essential packages
+RUN apt-get update && \
+    apt-get install -y \
+    curl \
+    unzip
+
+#Install aws cli v2
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86.zip" -o "awscli2.zip" && \
+    unzip awscli2.zip && \
+    sudo ./aws/install && \
+    rm -rf awscli2.zip
+
+#Install saml2aws
+RUN curl -o /usr/local/bin/saml2aws -L "https://github.com/Versent/saml2aws/releases/download/v2.34.0/saml2aws_2.43.0_linux_amd64" && \
+    chmod -x /usr/local/bin/saml2aws
+
+#Install Terraform
+RUN curl "https://releases.hashicorp.com/terraform/1.1.0/terraform_1.1.0_linux_amd64.zip" -o "terraform.zip" && \
+    unzip terraform.zip && \
+    mv terraform /usr/local/bin/ && \
+    rm -rf terraform.zip
+
+#Clean up
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+COPY --from=builder /tmp/agent /tmp/agent
+RUN chmod +x /tmp/agent
+RUN useradd vf-user \
+    --create-home \
+    --shell=/bin/bash \
+    --uid=1000 \
+    --user-group && \
+    echo "vf-user ALL=(ALL) NOPASSWD:ALL" >>/etc/sudoers.d/nopasswd
+WORKDIR /home/vf-user
+USER vf-user
+EXPOSE 9000
